@@ -1,0 +1,7 @@
+condition,eer_ecapa,eer_wavlm
+random_rep1,0.347,0.421
+random_rep2,0.293,0.376
+random_rep3,0.3209999999999999,0.419
+ecapa_only,0.4499999999999999,0.414
+wavlm_only,0.494,0.652
+ensemble,0.5640000000000001,0.642
