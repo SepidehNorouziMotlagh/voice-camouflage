@@ -25,6 +25,7 @@ import jiwer
 from tqdm import tqdm
 import sys
 import pandas as pd
+import numpy as np
 
 # ------------------------- Configuration -------------------------
 # IMPORTANT: This script is designed to run on Google Colab.
