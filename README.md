@@ -161,7 +161,7 @@ tqdm>=4.65.0
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/voice-camouflage.git
+git clone https://github.com/SepidehNorouziMotlagh/voice-camouflage.git
 cd voice-camouflage
 ```
 
@@ -223,7 +223,7 @@ python scripts/06d_merge_all_conditions.py
 
 | Selection Strategy |   WER |  STOI |
 | ------------------ | ----: | ----: |
-| Random             | 1.619 | 0.524 |
+| Random             | 1.190 | 0.524 |
 | ECAPA-only         | 1.212 | 0.517 |
 | WavLM-only         | 1.059 | 0.528 |
 | **Ensemble**       | 1.095 | 0.524 |
@@ -233,7 +233,7 @@ python scripts/06d_merge_all_conditions.py
 1. **Ensemble selection** provides the most consistent cross-model privacy
 2. **Selection effectiveness is model-dependent** (ECAPA-only overfits)
 3. **Strongest effect at 4 interfering speakers**
-4. **Utility preserved** (WER and STOI remain competitive)
+4. **Utility comparable to random selection** (WER and STOI remain competitive)
 
 ## 📝 Citation
 
