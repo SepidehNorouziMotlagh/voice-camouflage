@@ -1,0 +1,20 @@
+# Dataset and generated audio
+data/
+
+# Generated local manifests
+config/utterance_roles.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Environments
+.venv/
+venv/
+env/
+
+# Notebooks and OS files
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
