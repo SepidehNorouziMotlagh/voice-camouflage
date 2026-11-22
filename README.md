@@ -1,171 +1,206 @@
 # Voice Camouflage: Model-Dependent Speaker Selection
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Complete-brightgreen.svg)]()
+## Overview
 
-## 📋 Overview
+This project investigates whether selecting acoustically dissimilar interfering speakers can increase speaker-verification difficulty when a target utterance is mixed with multiple background voices.
 
-This repository contains the complete code and experimental pipeline for the paper:
+It compares three targeted speaker-selection strategies against random selection:
 
-> **"Model-Dependent Speaker Selection for Voice Camouflage: A Study of Privacy-Utility Trade-offs and Cross-Model Robustness"**
+- **ECAPA-only:** Selects background speakers with the lowest ECAPA-TDNN cosine similarity to the target.
+- **WavLM-only:** Selects background speakers with the lowest WavLM-XVector cosine similarity.
+- **Ensemble:** Combines normalized similarity ranks from both models.
+- **Random:** Selects background speakers randomly, with three repetitions.
 
-Voice camouflage protects speaker privacy by mixing a target utterance with interfering speech. This project investigates whether **targeted selection of interfering speakers** improves privacy and whether the effect transfers across speaker verification models.
+The evaluation examines speaker-verification EER using two pretrained speaker-recognition systems, alongside transcription-based and signal-level measures of speech utility.
 
-### Key Findings
+This is an exploratory study of model-dependent speaker selection under synthetic multi-speaker interference. Its results should not be interpreted as a general guarantee of speaker anonymity.
 
-- **Ensemble selection** (ECAPA + WavLM rank fusion) achieves the best cross-model privacy:
-  - ECAPA EER: **0.564**
-  - WavLM EER: **0.642**
-- **Selection effectiveness is model-dependent**: ECAPA-only selection overfits to ECAPA and shows limited transfer to WavLM
-- **Strongest effect at 4 interfering speakers** with diminishing returns at larger crowd sizes
-- **Utility preserved**: WER and STOI remain competitive with random baselines
+## Dataset
 
-## 📁 Repository Structure
+The experiments use the **LibriSpeech train-clean-100** subset.
 
-```
+The speaker partition used in the recorded experiment contains:
+
+- 100 target speakers
+- 151 background speakers
+
+For each target speaker, the available utterances are divided into:
+
+| Role | Utterances per target | Purpose |
+|---|---:|---|
+| Selection | 2 | Compute the target speaker representation |
+| Enrollment | 1 | Enroll the target in the speaker-verification evaluation |
+| Evaluation | 1 | Generate clean references and mixtures |
+
+The target speaker representation is calculated by averaging embeddings from the two selection utterances. Background speaker representations are calculated from the first available utterance for each background speaker.
+
+The original audio files are not included in this repository. Download LibriSpeech separately from [OpenSLR](https://www.openslr.org/12).
+
+## Method
+
+### 1. Speaker representation and similarity scoring
+
+Two pretrained speaker-recognition models are used:
+
+- **ECAPA-TDNN:** `speechbrain/spkrec-ecapa-voxceleb`
+- **WavLM-XVector:** `microsoft/wavlm-base-plus-sv`
+
+Cosine similarity is calculated between each target representation and each background speaker representation.
+
+Lower similarity scores are treated as greater speaker dissimilarity.
+
+### 2. Background speaker selection
+
+Four selection conditions are evaluated:
+
+| Strategy | Selection procedure |
+|---|---|
+| Random | Random background speaker selection, three repetitions |
+| ECAPA-only | Selects speakers with the lowest ECAPA similarity |
+| WavLM-only | Selects speakers with the lowest WavLM similarity |
+| Ensemble | Selects speakers using the average of normalized ECAPA and WavLM ranks |
+
+The ensemble strategy uses rank fusion rather than directly averaging similarity scores from two different models.
+
+Five crowd sizes are considered: **1, 2, 4, 6, and 8 interfering speakers**.
+
+### 3. Mixture generation
+
+For each target utterance, the selected background speakers contribute one randomly chosen utterance each.
+
+The mixture-generation configuration uses:
+
+- Sample rate: 16 kHz
+- Mixture duration: 12 seconds
+- Target RMS normalization: 0.1
+- Individual interferer scaling: 0 dB relative to the target
+
+Each background utterance is independently scaled to the target's RMS before the background signals are summed with the target.
+
+**Important:** The 0 dB setting applies to each individual interferer, not to the combined background crowd. The overall target-to-interference ratio therefore changes with the number of interfering speakers.
+
+The resulting mixture is normalized to the configured target RMS before being saved.
+
+The pipeline generates up to 3,000 mixture files across six conditions and five crowd sizes, using the 100 target speakers.
+
+## Evaluation
+
+### Speaker-verification privacy proxy: EER
+
+Equal Error Rate (EER) is calculated separately using ECAPA-TDNN and WavLM-XVector.
+
+For each target mixture, the evaluation constructs:
+
+- A genuine trial using the target's enrollment utterance and the mixed utterance.
+- An impostor trial using an enrollment utterance from one randomly selected different target speaker and the same mixture.
+
+**Aggregation detail:** The current EER scripts pool trials from all five crowd sizes before calculating one EER per condition. Consequently, the reported EER values do not represent the four-interferer condition alone.
+
+Higher EER can indicate greater difficulty for the verifier under its specified score direction. However, EER values above 0.5 require additional score-direction and ROC analysis before being interpreted as stronger privacy. EER is a model-specific evaluation measure, not proof of anonymization.
+
+### Transcription-based utility: WER
+
+Whisper Medium is used to transcribe clean target utterances and their corresponding mixtures.
+
+The transcript generated from the clean utterance is used as the reference when computing Word Error Rate (WER) for the mixture transcript.
+
+Therefore, these values measure transcription differences relative to Whisper's clean-audio output. They are not WER values against LibriSpeech's original human reference transcripts.
+
+### Signal-level utility: STOI
+
+Short-Time Objective Intelligibility (STOI) is calculated between the clean target utterance and its corresponding mixture.
+
+STOI provides a signal-level intelligibility measure. It does not measure speaker identity protection.
+
+### Results aggregation
+
+The final summary table combines:
+
+- EER values pooled across all five crowd sizes.
+- WER values at four interfering speakers.
+- STOI values at four interfering speakers.
+
+The columns therefore represent different aggregation scopes and should not be interpreted as measurements from one identical crowd-size condition.
+
+## Results
+
+### Speaker-verification evaluation
+
+<small>One EER value per condition, pooled across crowd sizes. The Random row is the arithmetic mean of the three random repetitions.</small>
+
+| Selection strategy | ECAPA EER | WavLM EER |
+|---|---:|---:|
+| Random (mean of 3 repetitions) | 0.320 | 0.405 |
+| ECAPA-only | 0.450 | 0.414 |
+| WavLM-only | 0.494 | 0.652 |
+| Ensemble | **0.564** | 0.642 |
+
+The ensemble strategy produces the highest reported ECAPA EER. WavLM-only selection produces a slightly higher WavLM EER than the ensemble strategy.
+
+These results illustrate that selection effectiveness depends on the speaker-verification backend.
+
+### Utility evaluation at four interfering speakers
+
+<small>Random values are averaged across the three random repetitions. WER uses Whisper's clean-audio transcript as its reference.</small>
+
+| Selection strategy | Whisper-reference WER | STOI |
+|---|---:|---:|
+| Random (mean of 3 repetitions) | 1.190 | 0.524 |
+| ECAPA-only | 1.212 | 0.517 |
+| WavLM-only | **1.059** | 0.528 |
+| Ensemble | 1.095 | 0.524 |
+
+The utility measurements show differences between selection strategies, although the STOI values are relatively close. The WER values should be interpreted as transcription differences relative to the clean Whisper output, rather than conventional reference-based ASR performance.
+
+## Repository Structure
+
+```text
 voice-camouflage/
-│
-├── README.md
-├── LICENSE
+├── config/
+│   └── speaker_partition.json
+├── scripts/
+│   ├── 00_build_manifest.py
+│   ├── 01_collect_paths.py
+│   ├── 02a_compute_ecapa_scores.py
+│   ├── 02b_compute_wavlm_scores.py
+│   ├── 02c_merge_scores.py
+│   ├── 03_generate_selections.py
+│   ├── 04_generate_mixtures.py
+│   ├── 05a_evaluate_eer_ecapa.py
+│   ├── 05b_evaluate_eer_wavlm.py
+│   ├── 05c_merge_eer.py
+│   ├── 06a_transcribe_clean.py
+│   ├── 06b_wer_condition_chunked.py
+│   ├── 06c_merge_condition_chunks.py
+│   ├── 06d_merge_all_conditions.py
+│   ├── 07_evaluate_stoi.py
+│   ├── 08_generate_summary_table.py
+│   └── 09_generate_plots.py
+├── results/
+│   ├── embeddings/
+│   ├── eer_results/
+│   ├── wer_results/
+│   ├── stoi_results/
+│   └── final_results_table.csv
+├── plots/
 ├── requirements.txt
 ├── .gitignore
-│
-├── config/
-│   └── utterance_roles.json          # Utterance splits for each speaker
-│
-├── scripts/
-│   ├── 00_build_manifest.py          # Build utterance role manifest
-│   ├── 02a_compute_ecapa_scores.py   # ECAPA similarity computation
-│   ├── 02b_compute_wavlm_scores.py   # WavLM similarity computation
-│   ├── 02c_merge_scores.py           # Merge ECAPA and WavLM scores
-│   ├── 03_generate_selections.py     # Generate selection lists
-│   ├── 04_generate_mixtures.py       # Generate voice camouflage mixtures
-│   ├── 05a_evaluate_eer_ecapa.py     # EER evaluation (ECAPA-TDNN)
-│   ├── 05b_evaluate_eer_wavlm.py     # EER evaluation (WavLM-XVector)
-│   ├── 05c_merge_eer.py              # Merge EER results
-│   ├── 06a_transcribe_clean.py       # Transcribe clean utterances
-│   ├── 06b_wer_condition_chunked.py  # WER for a condition (chunked)
-│   ├── 06c_merge_condition_chunks.py # Merge WER chunks for a condition
-│   ├── 06d_merge_all_conditions.py   # Merge all WER conditions
-│   ├── 07_evaluate_stoi.py           # STOI evaluation
-│   ├── 08_generate_summary_table.py  # Generate final results table
-│   └── 09_generate_plots.py          # Generate publication plots
-│
-├── results/
-│   ├── embeddings/                   # ECAPA and WavLM similarity scores
-│   ├── eer_results/                  # EER results under both models
-│   ├── wer_results/                  # WER results and transcripts
-│   ├── stoi_results/                 # STOI results
-│   └── final_results_table.csv       # Combined results table
-│
-├── plots/
-│   ├── wer_vs_crowd.png
-│   ├── stoi_vs_crowd.png
-│   ├── tradeoff_wavlm_vs_wer.png
-│   └── bar_chart_4talkers.png)
+├── LICENSE
+└── README.md
 ```
 
-## 🧪 Experimental Pipeline
+The audio dataset, generated path indexes, utterance manifest, selection lists, and mixtures are local generated files and are not included in the repository.
 
-### 1. Data Preparation
+## Reproducing the Pipeline
 
-```
-00_build_manifest.py
-```
-- Splits utterances into selection, enrollment, and evaluation sets
-- Creates `config/utterance_roles.json`
-
-### 2. Embedding Computation
-
-```
-02a_compute_ecapa_scores.py  → ECAPA similarity matrix
-02b_compute_wavlm_scores.py  → WavLM similarity matrix
-02c_merge_scores.py          → Combined similarity matrix
-```
-
-### 3. Selection List Generation
-
-```
-03_generate_selections.py
-```
-- Creates selection lists for four strategies:
-  - Random (3 repetitions)
-  - ECAPA-only
-  - WavLM-only
-  - Ensemble
-
-### 4. Mixture Generation
-
-```
-04_generate_mixtures.py
-```
-- Generates 3,000 mixture files across:
-  - 6 conditions (random_rep1–3, ecapa_only, wavlm_only, ensemble)
-  - 5 crowd sizes (1, 2, 4, 6, 8)
-
-### 5. Privacy Evaluation (EER)
-
-```
-05a_evaluate_eer_ecapa.py  → ECAPA-TDNN EER
-05b_evaluate_eer_wavlm.py  → WavLM-XVector EER
-05c_merge_eer.py           → Combined EER results
-```
-
-### 6. Utility Evaluation
-
-```
-06a_transcribe_clean.py       → Cache clean transcripts
-06b_wer_condition_chunked.py  → WER (chunked for Colab)
-06c_merge_condition_chunks.py → Merge WER chunks
-06d_merge_all_conditions.py   → Merge all conditions
-07_evaluate_stoi.py           → STOI evaluation
-```
-
-### 7. Results and Visualisation
-
-```
-08_generate_summary_table.py  → Final results table
-09_generate_plots.py          → Publication plots
-```
-
-## 🚀 Requirements
-
-### Installation
-
-```bash
-pip install -r requirements.txt
-```
-
-### `requirements.txt`
-
-```
-speechbrain>=1.0.0
-transformers>=4.36.0
-torch>=2.0.0
-torchaudio>=2.0.0
-soundfile>=0.12.0
-librosa>=0.10.0
-numpy>=1.24.0
-pandas>=2.0.0
-matplotlib>=3.7.0
-scipy>=1.10.0
-pystoi>=0.3.0
-openai-whisper>=20231117
-jiwer>=3.0.0
-tqdm>=4.65.0
-```
-
-## 🛠️ How to Use
-
-### 1. Clone the Repository
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/SepidehNorouziMotlagh/voice-camouflage.git
 cd voice-camouflage
 ```
 
-### 2. Install Dependencies
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -173,90 +208,136 @@ pip install -r requirements.txt
 
 ### 3. Download LibriSpeech
 
-Download `train-clean-100.tar.gz` from [OpenSLR](https://www.openslr.org/12/).
+Download `train-clean-100.tar.gz` from [OpenSLR](https://www.openslr.org/12).
 
-### 4. Update Paths
+Extract it to:
 
-In the scripts, update the `LIBRI_PATH` variable to point to your LibriSpeech directory.
+```text
+data/LibriSpeech/train-clean-100/
+```
 
-### 5. Run the Pipeline
+### 4. Generate audio path indexes
 
-Run the scripts in numerical order:
+The committed `config/speaker_partition.json` preserves the target/background speaker assignment from the experiment.
+
+Run:
+
+```bash
+python scripts/01_collect_paths.py
+```
+
+This generates:
+
+```text
+data/target_audio_paths.json
+data/background_audio_paths.json
+```
+
+### 5. Build the utterance manifest
 
 ```bash
 python scripts/00_build_manifest.py
-python scripts/02a_compute_ecapa_scores.py
-python scripts/02b_compute_wavlm_scores.py
-# ... and so on
 ```
 
-### 6. Running WER on Google Colab
+This creates the local manifest:
 
-For WER evaluation, the chunked scripts are designed for Google Colab:
+```text
+config/utterance_roles.json
+```
 
-1. Upload the project folder to Google Drive
-2. Update `BASE_DIR` in the scripts to match your Drive path
-3. Run chunks sequentially:
+### 6. Compute speaker similarities
+
+```bash
+python scripts/02a_compute_ecapa_scores.py
+python scripts/02b_compute_wavlm_scores.py
+python scripts/02c_merge_scores.py
+```
+
+### 7. Generate speaker selections
+
+```bash
+python scripts/03_generate_selections.py
+```
+
+### 8. Generate mixtures
+
+```bash
+python scripts/04_generate_mixtures.py
+```
+
+### 9. Evaluate speaker-verification EER
+
+```bash
+python scripts/05a_evaluate_eer_ecapa.py
+python scripts/05b_evaluate_eer_wavlm.py
+python scripts/05c_merge_eer.py
+```
+
+### 10. Evaluate transcription utility
+
+First, generate clean Whisper transcripts:
 
 ```bash
 python scripts/06a_transcribe_clean.py
+```
+
+The chunked WER scripts are configured for Google Colab. Update `BASE_DIR` in scripts `06b`, `06c`, and `06d` to point to the project directory in Google Drive.
+
+For each condition, run the ten speaker chunks:
+
+```bash
 python scripts/06b_wer_condition_chunked.py random_rep1 0
 python scripts/06b_wer_condition_chunked.py random_rep1 1
-# ... up to 9
+```
+
+Continue through chunk 9, then merge:
+
+```bash
 python scripts/06c_merge_condition_chunks.py random_rep1
-# Repeat for other conditions
+```
+
+Repeat for the other five conditions and run:
+
+```bash
 python scripts/06d_merge_all_conditions.py
 ```
 
-## 📊 Results
+### 11. Evaluate STOI and generate summaries
 
-### Privacy (EER)
-
-| Selection Strategy | ECAPA EER | WavLM EER |
-| ------------------ | --------: | --------: |
-| Random             |     0.320 |     0.405 |
-| ECAPA-only         |     0.450 |     0.414 |
-| WavLM-only         |     0.494 |     0.652 |
-| **Ensemble**       | **0.564** | **0.642** |
-
-### Utility (4 Interfering Speakers)
-
-| Selection Strategy |   WER |  STOI |
-| ------------------ | ----: | ----: |
-| Random             | 1.190 | 0.524 |
-| ECAPA-only         | 1.212 | 0.517 |
-| WavLM-only         | 1.059 | 0.528 |
-| **Ensemble**       | 1.095 | 0.524 |
-
-### Key Takeaways
-
-1. **Ensemble selection** provides the most consistent cross-model privacy
-2. **Selection effectiveness is model-dependent** (ECAPA-only overfits)
-3. **Strongest effect at 4 interfering speakers**
-4. **Utility comparable to random selection** (WER and STOI remain competitive)
-
-## 📝 Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@article{motlagh2025voicecamouflage,
-  title={Model-Dependent Speaker Selection for Voice Camouflage: A Study of Privacy-Utility Trade-offs and Cross-Model Robustness},
-  author={Motlagh, Sepideh Norouzi},
-  year={2025}
-}
+```bash
+python scripts/07_evaluate_stoi.py
+python scripts/08_generate_summary_table.py
+python scripts/09_generate_plots.py
 ```
 
-## 📄 License
+## Limitations and Reproducibility Notes
 
-MIT License — see [LICENSE](LICENSE) file for details.
+- The evaluation uses two pretrained speaker-verification backends; results may not generalize to other systems.
+- EER is pooled across the five crowd sizes in the current implementation.
+- Each impostor trial uses one randomly selected different target speaker rather than an exhaustive set of impostor comparisons.
+- EER values above 0.5 require score-direction analysis before being interpreted as privacy improvements.
+- Each interferer is independently scaled to 0 dB relative to the target. The combined crowd does not have a fixed overall SNR.
+- The current random-selection implementation resets its random seed inside the target-speaker loop. This causes the same background-speaker selections to be reused across targets within a given repetition.
+- WER is calculated against Whisper transcripts of clean utterances, not human reference transcripts.
+- STOI measures signal-level intelligibility and is not a privacy metric.
+- The current results do not establish resistance to adaptive attackers, speaker re-identification using other models, or a general privacy guarantee.
 
-## 🙏 Acknowledgements
+Future work should examine fixed overall mixture SNR, independent random-selection trials, per-crowd-size EER, more extensive impostor trials, and score-direction-aware verification analysis.
 
-- [LibriSpeech](https://www.openslr.org/12/) for the read speech corpus
-- [SpeechBrain](https://speechbrain.github.io/) for the ECAPA-TDNN model
-- [Hugging Face](https://huggingface.co/) for the WavLM model and transformers
-- [Whisper](https://github.com/openai/whisper) for ASR transcription
-- [PySTOI](https://github.com/mpariente/pystoi) for intelligibility evaluation
-- [JiWER](https://github.com/jitsi/jiwer) for WER computation
-```
+## Dataset Citation
+
+Please cite the original LibriSpeech publication when using the dataset:
+
+Panayotov, V., Chen, G., Povey, D., & Khudanpur, S. (2015). *LibriSpeech: An ASR Corpus Based on Public Domain Audio Books*. 2015 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP), 5206–5210.
+
+https://doi.org/10.1109/ICASSP.2015.7178964
+
+## License
+
+MIT License. See `LICENSE`.
+
+## Author
+
+**Sepideh Norouzi Motlagh**
+
+[GitHub](https://github.com/SepidehNorouziMotlagh)
